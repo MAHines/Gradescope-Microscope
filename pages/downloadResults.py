@@ -328,7 +328,7 @@ def get_assignments(course_id):
     """ Gets a dictionary of all of the assignments associated with the course_id. Returns
         a dictionary of courses. """
     driver = ss.driver
-    url = 'https://www.gradescope.com/courses/' + str(course_id)
+    url = 'https://www.gradescope.com/courses/' + str(course_id) + '/assignments'
     driver.get(url)
     
     div_class_name = 'l-table'

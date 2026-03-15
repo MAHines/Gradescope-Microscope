@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import utils
-from datetime import datetime
+from datetime import datetime, timedelta
 from streamlit import session_state as ss
 
 def handle_graderActivity_upload_change():
@@ -34,11 +34,13 @@ def analyze_one_grader(grader):
     # We need to distinguish between actual breaks and time spent, for example, reading reports
     #   To do this, we use the common approach of saying breaks longer than the 95th percentile
     #   are actual breaks. This avoids problems with different types of assignments having
-    #   different grading patterns, and different graders having different behaviors.
+    #   different grading patterns, and different graders having different behaviors. Nevertheless,
+    #   there needs to be an upper limit on this, because some people are taking a break after each 
+    #   report.
     temp_df = ss.grader_df[ss.grader_df['Grader'] == grader].copy()
     temp_df['break_time'] = temp_df['Time'].diff()
     break_distribution = temp_df['break_time'].dt.total_seconds() / 60
-    percentile_95 = temp_df['break_time'].quantile(0.95) # , interpolation='linear')
+    percentile_95 = min(temp_df['break_time'].quantile(0.95), timedelta(minutes = 7.0))
     
     ss.grader_df['start'] = ss.grader_df['Time'] - percentile_95
     ss.grader_df['end'] = ss.grader_df['Time']
