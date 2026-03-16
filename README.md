@@ -12,7 +12,7 @@ The package is currently under construction.
 – cd to Gradescope-Microscope folder  
 – streamlit run microscope.py  
 
-## Updating Alfred from the command line
+## Updating Gradescope-Microscope from the command line
 – cd to Gradescope-Microscope folder  
 – git pull  
 
