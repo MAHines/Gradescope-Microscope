@@ -33,7 +33,7 @@ def GS_login_password():
     driver.get("https://www.gradescope.com/login")
     
     # Use WebDriverWait to handle dynamic elements
-    wait = WebDriverWait(driver, 10)
+    wait = WebDriverWait(driver, 30)
     
     # Locate fields and send keys
     email_field = wait.until(EC.presence_of_element_located((By.NAME, "session[email]")))
@@ -51,7 +51,7 @@ def GS_login_password():
     login_button.click()
     
     div_class_name = 'courseList--term'
-    wait = WebDriverWait(driver, 10).until(
+    wait = WebDriverWait(driver, 30).until(
             EC.visibility_of_element_located((By.CLASS_NAME, div_class_name))
             )
     
@@ -95,7 +95,7 @@ def get_questions():
     div_class_name = 'statisticsTable'
     try:
         # Wait until the element with the specified class is visible
-        visible_div = WebDriverWait(driver, 10).until(
+        visible_div = WebDriverWait(driver, 30).until(
             EC.visibility_of_element_located((By.CLASS_NAME, div_class_name))
         )
     
@@ -132,7 +132,7 @@ def get_rubric_items(question_index):
     div_class_name = 'statisticsSummary'
     try:
         # Wait until the element with the specified class is visible
-        visible_div = WebDriverWait(driver, 10).until(
+        visible_div = WebDriverWait(driver, 30).until(
             EC.visibility_of_element_located((By.CLASS_NAME, div_class_name))
         )
     except TimeoutException:
@@ -183,7 +183,7 @@ def get_assignment_data():
             div_class_name = '.table--header.table--header-withFilter'
             try:
                 # Wait until the element with the specified class is visible
-                visible_div = WebDriverWait(driver, 10).until(
+                visible_div = WebDriverWait(driver, 30).until(
                     EC.visibility_of_element_located((By.CSS_SELECTOR, div_class_name))
                 )
             except TimeoutException:
@@ -196,7 +196,7 @@ def get_assignment_data():
             # We load each individual table into rubric_item_df, reformat, then merge with activity_df
             if numApplied > 0:
                 try:
-                    table_element = WebDriverWait(driver, 10).until(
+                    table_element = WebDriverWait(driver, 30).until(
                         EC.presence_of_element_located((By.XPATH, "//table[@id='DataTables_Table_0']")) # Replace with your table's XPath or CSS selector
                     )
                 except TimeoutException:
@@ -244,7 +244,7 @@ def get_students_in_order():
     driver.get(url)
     try:
         # Wait until the element with the specified class is visible
-         table_element = WebDriverWait(driver, 10).until(
+         table_element = WebDriverWait(driver, 30).until(
                     EC.presence_of_element_located((By.XPATH, "//table[@id='question_submissions']")) # Replace with your table's XPath or CSS selector
                 )
     except TimeoutException:
@@ -298,7 +298,7 @@ def get_courses(recent = True):
     div_class_name = 'courseList'
     try:
         # Wait until the element with the specified class is visible
-        visible_div = WebDriverWait(driver, 10).until(
+        visible_div = WebDriverWait(driver, 30).until(
             EC.visibility_of_element_located((By.CLASS_NAME, div_class_name))
         )
     
@@ -348,7 +348,7 @@ def get_assignments(course_id):
     div_class_name = 'l-table'
     try:
         # Wait until the element with the specified class is visible
-        visible_div = WebDriverWait(driver, 10).until(
+        visible_div = WebDriverWait(driver, 30).until(
             EC.visibility_of_element_located((By.CLASS_NAME, div_class_name))
         )
     

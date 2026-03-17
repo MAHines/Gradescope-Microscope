@@ -81,7 +81,6 @@ This module allow certain user settings to be stored in prefs.toml in the .strea
 – cd to the folder that will contain Gradescope Microscope  
 – git clone https://github.com/MAHines/Gradescope-Microscope.git   
 
-
 ### Running Gradescope Microscope from the command line
 – cd to Gradescope-Microscope folder  
 – streamlit run microscope.py  
