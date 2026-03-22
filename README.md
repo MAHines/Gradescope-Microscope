@@ -8,9 +8,7 @@
 This package downloads the entire grading history of a Gradescope assignment and then provides tools
 for its analysis on either a course-wide or grader-by-grader basis.
 
-This package uses Selenium, a framework for automating web browsers. After installing Selenium (pip
-install selenium), you must install a webdriver, such as ChromeDriver which can be downloaded
-[here](https://developer.chrome.com/docs/chromedriver/downloads).  
+This package uses Selenium, a framework for automating web browsers.
 
 ### Download Gradescope Results
 
@@ -27,6 +25,13 @@ in Gradescope, finding all of the rubric items. The script then loops through ea
 and records the grading activity associated with that item. Once complete, the user is given the opportunity
 to save the grading data in a csv for analysis with "Analyze Grader Activity."
 
+This module (and the next one) also show all regrade activity, including student requests and grader
+replies. These are presented in an easy to scan format as shown below.  
+
+<div align="center">
+    <img src="assets/Regrade_comments.png" alt="Table of all regrade requests" style="width: 95%;">
+</div>
+
 There is also an option to download the Evaluations Folder for analysis with "Analyze Grades."  
 
 ### Analyze Grader Activity  
@@ -36,14 +41,20 @@ from your Downloads folder onto the file uploader. An estimate of the
 time each grader spent grading is calculated, as shown below.
 
 <div align="center">
-    <img src="assets/Grading_time.png" alt="Table of estimated grading times" style="width: 80%;">
+    <img src="assets/Grading_time.png" alt="Table of estimated grading times" style="width: 95%;">
+</div>
+
+The grading and regrading data are also presented in an easy to read histogram for the entire class
+and on a grader-by-grader basis.
+
+<div align="center">
+    <img src="assets/Grading_Histogram.png" alt="Histogram of grading and regrading times" style="width: 80%;">
 </div>
 
 This module also identifies papers that had multiple graders. This can be useful for catching 
 unauthorized grading if each paper is supposed to be graded (and regraded) by a single grader. The script
 can also be used to analyze an individual grader's behavior, which can be useful in understanding
 slow graders or awkward rubrics.
-
 
 ### Analyze Grades
 
@@ -67,16 +78,18 @@ using this module. There is no need to do this if you prefer to log in manually.
 This module allow certain user settings to be stored in prefs.toml in the .streamlit folder
 
 ## Installation
-– Use Anaconda to make an env contains the following packages:  
+– Use Anaconda and pip install to make an env contains the following packages:  
   
     beautifulsoup4  
     keyring  
-    numpy  
+    numpy
+    openpyxl  
     pandas  
     plotly  
     selenium  
     streamlit  
-    tomlkit  
+    tomlkit
+    XlsxWriter  
  
 – cd to the folder that will contain Gradescope Microscope  
 – git clone https://github.com/MAHines/Gradescope-Microscope.git   

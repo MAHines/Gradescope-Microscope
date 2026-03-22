@@ -15,9 +15,17 @@ from selenium.common.exceptions import TimeoutException
 from bs4 import BeautifulSoup
 import time
 import utils
+import json
 
-TIMEOUT = 30
+TIMEOUT = 30    # I got occasional timeouts at 10 sec, so upped to 30 sec
 
+# ss.questions: A list of (question_id, question_num)
+# ss.assignment_dict: A dict of assignment_names: assignment_ids
+# ss.all_items: a list of (question_id, question_num, rubric_items) for question question_index where 
+#         rubric_items is a list of the form (rubric_item_id, rubric_item_name)
+# ss.activity_df: The main datafrome
+# ss.regrades_df: The dataframe of regrading data
+        
 def GS_login_password():
     """ Allows a user to log in with an e-mail address and password stored in the user's login
             keychain. """
@@ -159,6 +167,134 @@ def get_rubric_items(question_index):
     
     return ([question_id, question_num, rubric_items])
     
+def get_regrades_df():
+    """ Returns a list of regrade requests for a particular assignment """
+    driver = ss['driver']
+    url = ('https://www.gradescope.com/courses/' + str(ss['course_id']) + '/assignments/'
+            + str(ss['assignment_id']) + '/regrade_requests')
+    driver.get(url)
+
+    div_class_name = '.table.js-regradeRequestsTable.dataTable.no-footer'
+    
+    try:
+        # Wait until the element with the specified class is visible
+        visible_div = WebDriverWait(driver, TIMEOUT).until(
+            EC.visibility_of_element_located((By.CSS_SELECTOR, div_class_name))
+        )
+    
+    except TimeoutException:
+        st.write(f"Timed out waiting for the div with class '{div_class_name}' to become visible.")    
+    
+    regrades = []
+    # Need to determine whether grades have been released yet
+    soup = BeautifulSoup(driver.page_source, 'lxml')
+    grades_not_released = soup.find('div', id='blank_state')
+    if grades_not_released is not None:
+        return regrades
+
+    try:
+        table_element = WebDriverWait(driver, TIMEOUT).until(
+            EC.presence_of_element_located((By.XPATH, "//table[@id='DataTables_Table_0']"))
+        )
+    except TimeoutException:
+        st.write("Timed out waiting for the table DataTables_Table_0 to become visible.") 
+        
+    # Get the info in the text of the regrades table
+    table_html = table_element.get_attribute('outerHTML')  
+    regrades_df = pd.read_html(StringIO(table_html))[0]
+    
+    # Grab the links to the regrade results, and store in regrades_df
+    soup = BeautifulSoup(table_html, 'html.parser')
+    links = [a.get('href')
+             for a in soup.find_all('a', href=True)
+             if 'Review' not in a.get_text(strip = True)]
+    regrades_df['link'] = links
+    regrades_df['submission_id'] = (regrades_df['link'].str.split('/').str[-1]).str.split('#').str[0]
+    regrades_df['Q_short'] = 'Q ' + regrades_df['Question'].str.split(':').str[0]
+    cols_to_drop = ['Sections','Completed','Review', 'link']
+    regrades_df = regrades_df.drop(columns = cols_to_drop)
+    regrades_df = regrades_df.sort_values(by = 'Student')
+
+    submission_ids = regrades_df['submission_id'].unique().tolist()
+    
+    results = []
+    for id in submission_ids:
+        regrades_for_student_df = get_regrades_for_one_student(id)
+        subdf = regrades_df[regrades_df['submission_id'] == id]
+        merged_df = pd.merge(left = subdf, right = regrades_for_student_df, on = 'Q_short', how = 'left')
+        results.append(merged_df)
+    
+    regrades_df = pd.concat(results, ignore_index = True)
+    regrades_df['Submission_time'] = pd.to_datetime(regrades_df['Submission_time'], errors='coerce', utc = True)
+    regrades_df['Submission_time'] = regrades_df['Submission_time'].dt.tz_convert('America/New_York')
+    regrades_df['Submission_time'] = regrades_df['Submission_time'].dt.tz_localize(None)
+
+    cols_to_drop = ['Q_short','submission_id']
+    regrades_df = regrades_df.drop(columns = cols_to_drop)
+    ss.regrades_df = regrades_df
+
+def get_regrades_for_one_student(submission_id):
+
+    driver = ss['driver']
+    url = ('https://www.gradescope.com/courses/' + str(ss['course_id']) + '/assignments/'
+            + str(ss['assignment_id']) + '/submissions/' + str(submission_id))
+    driver.get(url)
+    
+    div_class_name = '.l-reactWrapper.notranslate'
+    try:
+        # Wait until the element with the specified class is visible
+        visible_div = WebDriverWait(driver, TIMEOUT).until(
+            EC.visibility_of_element_located((By.CSS_SELECTOR, div_class_name))
+        )
+    
+    except TimeoutException:
+        st.write(f"Timed out waiting for the div with class '{div_class_name}' to become visible.") 
+        
+    soup = BeautifulSoup(driver.page_source, 'html.parser')   
+    
+    element_with_props = soup.find('div', attrs={'data-react-class': 'AssignmentSubmissionViewer', 
+                                                 'data-react-props': True})
+    
+    cols = ['Q_short', 'Submission_time', 'Student_comment', 'Grader_reply', 'complete']
+    regrades_for_student_df = pd.DataFrame(columns = cols)
+    if element_with_props:
+        #st.code(element_with_props.prettify())
+        props_json_string = element_with_props['data-react-props']
+        data_props = json.loads(props_json_string)
+        
+        # Only needs to be done once.
+        if ss.questionName_dict is None:
+            questionName_dict = {}
+            outline = data_props.get("outline")
+            for parent_index, parent in enumerate(outline):
+                parent_id = parent["id"]
+                
+                if "children" in parent:
+                    for child_index, child in enumerate(parent["children"]):
+                         child_id = child['id']
+                         name = 'Q ' + str(parent_index + 1) + '.' + str(child_index + 1)
+                         questionName_dict[child_id] = name
+                else:
+                    name = 'Q ' + str(parent_index + 1)
+                    questionName_dict[parent_id] = name
+            ss.questionName_dict = questionName_dict
+        
+        # question_dict maps id of students specific question to the general question id
+        question_dict = {item['id']: item['question_id'] for item in data_props.get('question_submissions')}
+        student_regrade_requests = data_props.get("regrade_requests")
+        for request in student_regrade_requests:
+            question = ss.questionName_dict[question_dict[request['question_submission_id']]]
+            Submission_time = request['created_at']
+            Student_comment = request['student_comment']
+            Grader_reply = request['staff_comment']
+            complete = request['completed']
+            
+            new_row_data =[str(question), Submission_time, Student_comment, Grader_reply, complete]
+            regrades_for_student_df.loc[len(regrades_for_student_df)] = new_row_data
+            
+#     st.dataframe(regrades_for_student_df)
+    return regrades_for_student_df
+
 def get_all_rubric_items():
     """ Iterates through all of the questions, collecting the rubric items for each one """
     ss['all_items'] = []
@@ -174,7 +310,6 @@ def get_assignment_data():
 
     driver = ss['driver']
     activity_df = ss['activity_df']
-    current_year = datetime.now().year  # May be wrong if we are analyzing historical data
     for item in ss['all_items']:
         question_id, question_num, rubric_items = item
         for rubric_item in rubric_items:
@@ -200,7 +335,7 @@ def get_assignment_data():
             if numApplied > 0:
                 try:
                     table_element = WebDriverWait(driver, TIMEOUT).until(
-                        EC.presence_of_element_located((By.XPATH, "//table[@id='DataTables_Table_0']")) # Replace with your table's XPath or CSS selector
+                        EC.presence_of_element_located((By.XPATH, "//table[@id='DataTables_Table_0']"))
                     )
                 except TimeoutException:
                     st.write("Timed out waiting for the table DataTables_Table_0 to become visible.") 
@@ -211,7 +346,7 @@ def get_assignment_data():
                 
                 # Convert the Graded time column to a proper datetime
                 time_part = rubric_item_df['Graded time'].str.extract(r'^(.*?)\s*\(')[0].str.strip()
-                full_datetime_str = str(current_year) + ' ' + time_part.str.replace(" at ", " ")
+                full_datetime_str = str(ss.year) + ' ' + time_part.str.replace(" at ", " ")
                 # rubric_item_df['Graded time'] = full_datetime_str
                 rubric_item_df['Graded time'] = pd.to_datetime(full_datetime_str, format='%Y %b %d %I:%M%p')
                 
@@ -229,9 +364,6 @@ def get_assignment_data():
                 rename_mapping = {'Graded time': new_graded_time,
                                   'Last graded by': new_last_graded}
                 rubric_item_df = rubric_item_df.rename(columns = rename_mapping)
-                
-                # Set the index
-                # rubric_item_df = rubric_item_df.set_index('Student\'s name')
                 
                 activity_df = pd.merge(activity_df, rubric_item_df, on = 'Student\'s name', how = 'left')
     
@@ -253,6 +385,7 @@ def get_students_in_order():
     except TimeoutException:
         st.write("Timed out waiting for the table question_submissions to become visible.")    
 
+    # Grab table of names from the submissions for one question
     table_html = table_element.get_attribute('outerHTML')  
     students_df = pd.read_html(StringIO(table_html))[0]
     ss['activity_df'] = students_df[['User']]
@@ -260,6 +393,19 @@ def get_students_in_order():
     ss['activity_df'] = ss['activity_df'].rename(columns = {'User': 'Student\'s name'})
     ss['activity_df'] = ss['activity_df'].rename_axis(index="order")
     ss['activity_df'] = ss['activity_df'].reset_index()
+    
+    # While we are here, let's grab links to student papers
+    soup = BeautifulSoup(table_html, 'html.parser')
+    tds = soup.find_all('td', class_ = 'table--primaryLink')
+    updates = {}
+    for td in tds:
+        a_tag = td.find('a')
+        if a_tag and 'href' in a_tag.attrs:
+            url = "https://www.gradescope.com" + a_tag['href']
+            student_name = a_tag.get_text(strip = True)
+            updates[student_name] = url
+    for name, url in updates.items(): 
+         ss.activity_df.loc[ss.activity_df["Student's name"] == name, "link"] = url
     
 def process_the_assignment():
     """ After the user has selected a course and assignment, this function does all of the processing. """
@@ -270,6 +416,13 @@ def process_the_assignment():
     get_students_in_order()
     get_all_rubric_items()
     get_assignment_data()
+    ss.questionName_dict = None
+    get_regrades_df()
+
+def reset_contents():
+    ss.activity_df = None
+    ss.regrades_df = None 
+    ss.questionName_dict = None   
         
 def previousTerm(currentTerm):
     semester, year_str = currentTerm.split()
@@ -342,6 +495,32 @@ def get_courses(recent = True):
     course_dict = {k: v for k, v in zip(course_names, course_ids)}
     ss['course_dict'] = course_dict
     
+def get_year():
+    """ Gets the current year by looking on the dashboard """
+    driver = ss.driver
+    url = 'https://www.gradescope.com/courses/' + str(ss.course_id)
+    driver.get(url)
+    
+    div_class_name = 'l-content'
+    try:
+        # Wait until the element with the specified class is visible
+        visible_div = WebDriverWait(driver, TIMEOUT).until(
+            EC.visibility_of_element_located((By.CLASS_NAME, div_class_name))
+        )
+    
+    except TimeoutException:
+        st.write(f"Timed out waiting for the div with class '{div_class_name}' to become visible.")    
+
+    soup = BeautifulSoup(driver.page_source, 'lxml')
+    
+    div = soup.find('h2', class_='courseHeader--term')
+    if div is not None:
+        term = div.text
+        year = int(term.split()[-1])
+    else:
+        year = int(datetime.now().year)
+    ss.year = year
+
 def get_assignments(course_id):
     """ Gets a dictionary of all of the assignments associated with the course_id. Returns
         a dictionary of courses. """
@@ -360,7 +539,7 @@ def get_assignments(course_id):
         st.write(f"Timed out waiting for the div with class '{div_class_name}' to become visible.")    
 
     soup = BeautifulSoup(driver.page_source, 'lxml')
-
+    
     assignment_ids = []
     assignment_names = []
 
@@ -379,14 +558,17 @@ def handle_course_change():
     """ Handles course selection change drop down. When the course changes, get a list
         of all assignments for that course and reset the assignment selector to none """
     ss.course_id = ss.course_dict[ss.selected_course]
+    get_year()
     get_assignments(ss.course_id)
     ss.selected_assignment = None
     ss.assignment_id = None
+    reset_contents()
     
 def handle_assignment_change():
     """ Handles assignment selection change drop down """
     selected_assignment = ss.selected_assignment
     ss['assignment_id'] = ss.assignment_dict[selected_assignment]
+    reset_contents()
 
 def handle_evaluations_download():
     driver = ss.driver
@@ -417,12 +599,18 @@ if 'selected_assignment' not in ss:
     ss.selected_assignment = None
 if 'downloaded_assignment' not in ss:
     ss.downloaded_assignment = None
+if 'questionName_dict' not in ss:
+    ss.questionName_dict = None
+if 'activity_df' not in ss:
+    ss.activity_df = None
+if 'regrades_df' not in ss:
+    ss.regrades_df = None
 
 st.title('Download Assignment Grading Data')
 
 text_str = "Use the button below to log in to Gradescope. If you are NOT using automated password login,  "
 text_str += "you will have 3 min to complete the login in the browser window after you push the button. "
-text_str += "In either case, leave the browser window open after you finish."
+text_str += "In either case, leave the browser window open after you finish logging in."
 st.write(text_str)
 
 if ss.driver is None:
@@ -435,7 +623,7 @@ if ss['course_dict'] is not None:
         'Select a course', # Label for the dropdown
         options = list(ss['course_dict'].keys()), # The options to display
         key = 'selected_course',
-        index = None,                # Always start at none selected
+#         index = None,                # Always start at none selected
         on_change = handle_course_change
     )
     
@@ -444,15 +632,16 @@ if ss['assignment_dict'] is not None:
         'Select an assignment', # Label for the dropdown
         options = list(ss['assignment_dict'].keys()), # The options to display
         key = 'selected_assignment',
-        index = None,                # Always start at none selected
+#         index = None,                # Always start at none selected
         on_change = handle_assignment_change
     )
-    
+
 if ss.course_id is not None and ss.assignment_id is not None:
     text_str = 'After pushing the button, the script will loop through the assignment in Gradescope, '
     text_str += 'finding all of the rubric items. It will then loop through each rubric item and '
-    text_str += 'record the grading activity associated with that item. At the end, you will be '
-    text_str += 'given the opportunity to save the grading data in a csv for analysis.'
+    text_str += 'record the grading activity associated with that item. If there have been any regrades, '
+    text_str += ' their data will be downloaded. At the end, you will be '
+    text_str += 'given the opportunity to save the grading data to an Excel file for analysis.'
     st.write(text_str)
     if st.button("Start Downloading", type = 'primary'):
         status_placeholder = st.empty()
@@ -463,18 +652,33 @@ if ss.course_id is not None and ss.assignment_id is not None:
         elapsed_time = (end_time - start_time)/60
         status_placeholder.write(f"Elapsed time: {elapsed_time:.1f} min")
 
-if 'activity_df' in ss:
-    st.dataframe(ss['activity_df'])
+if ss.activity_df is not None:
     
-    twoWords = ss.downloaded_assignment.split()[:2] # Use first two words of assignment
-    shortAssignmentName  = "_".join(twoWords) 
-    file_name = shortAssignmentName + '_GS_activity' + '_' + datetime.now().strftime("%b_%d") + '.csv'
-    combined_data = ss['activity_df'].to_csv(index = False, header = True).encode('utf-8')
-    st.download_button(label = 'Download Gradescope Activity Report as csv',
-                    data = combined_data,
-                    file_name = file_name,
-                    mime = 'text/csv',
-                    type = 'primary')
+    st.write('### All grading activity')
+    st.dataframe(ss['activity_df'], 
+                 column_config={"link": st.column_config.LinkColumn("link", display_text="link")},
+                 hide_index = True)
+    
+    st.write('### All regrading activity')
+    text_str = 'If the text in a cell is too long to read, double-click for a better view.'
+    st.write(text_str)
+    if 'regrades_df' in ss:
+        st.dataframe(ss['regrades_df'], hide_index=True, row_height=110)
+
+    text_str = 'You can save the data '
+    text_str += 'as separate sheets of a single Excel file in your downloads folder '
+    text_str += 'using the button below. This avoids the need for multiple csv\'s'
+    st.write(text_str) 
+    if st.button('Download to Excel', type = 'primary'):
+        twoWords = ss.downloaded_assignment.split()[:2] # Use first two words of assignment
+        shortAssignmentName  = "_".join(twoWords) 
+        file_name = '~/Downloads/GS_activity_' + shortAssignmentName + '_' + datetime.now().strftime("%b_%d") + '.xlsx'
+        with pd.ExcelWriter(file_name, mode = 'w',engine='xlsxwriter') as writer:
+            # Write each dataframe to a different worksheet
+            ss.activity_df.to_excel(writer, sheet_name='Grading', index=False)
+            if ss.regrades_df is not None:
+                ss.regrades_df.to_excel(writer, sheet_name='Regrading', index=False)
+
                     
     text_str = 'You can use the button below to \'Export Evaluations\' for this assignment. '
     text_str += 'Your Chromium window may say \'insecure download blocked.\' If so, select '
@@ -485,6 +689,7 @@ if 'activity_df' in ss:
                 type = 'primary',
                 on_click = handle_evaluations_download)
         
+    
 if ss.driver is not None:
     st.button('Log out of Gradescope',
                 type = 'primary',
