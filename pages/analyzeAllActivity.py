@@ -25,8 +25,8 @@ def analyze_one(acts_df, grader):
     temp_df = acts_df[acts_df['Grader'] == grader].copy()
     temp_df['pause_time'] = temp_df['Time'].diff()
     percentile_96 = min(temp_df['pause_time'].quantile(0.96), timedelta(minutes = 7.0))
-    if percentile_96 < timedelta(minutes = 1.0):   # Likely because of a single entry
-        percentile_96 = timedelta(minutes = 1.0)
+    if percentile_96 < timedelta(minutes = 2.0):   # Possibly because of a single entry
+        percentile_96 = timedelta(minutes = 2.0)
     
     oneActivity_df = acts_df[acts_df['Grader'] == grader].copy()
     oneActivity_df['start'] = oneActivity_df['Time'] - percentile_96
@@ -100,6 +100,7 @@ def calculate_statistics():
 def reset_uploader():
     """Function to clear the uploaded files and show the uploader again."""
     ss['grading_acts_df'] = None
+    ss.regrades_df = None
 
 def get_next_count(counts, curVal):
     if len(counts) > curVal:
@@ -182,6 +183,7 @@ def handle_allActivity_upload():
     if ss['allActivity_uploader_key'] is not None:
         all_sheets = pd.read_excel(ss.allActivity_uploader_key, sheet_name = None)
         
+        regrades_df = None
         for sheet_name, df in all_sheets.items():
             if sheet_name == 'Grading':
                 allActivity_df = df
@@ -231,6 +233,7 @@ def reset_uploader():
     ss['allActivity_df'] = None
     ss['grading_acts_df'] = None
     ss.regrades_df = None
+    ss.df_combinedForFig = None
 
 def update_use_grader_white_list_local():
     input = ss.use_grader_white_list_input_local
@@ -255,6 +258,8 @@ if 'oneGradersSessions_df' not in ss:
     ss.oneGradersSessions_df = pd.DataFrame()
 if 'regrading_start' not in ss:
     ss.regrading_start = pd.Timestamp.now()
+if 'df_combinedForFig' not in ss:
+    ss.df_combinedForFig = None
 
 st.title('Analyze Grader Activity')
 
@@ -272,6 +277,14 @@ st.button("Reset or work on a different course.",
             on_click=reset_uploader,
             type = 'primary')
 
+def prepFig1():
+    temp1 = ss.grading_acts_df.copy()
+    temp1['series'] = 'Grading'
+    temp2 = ss.regrading_acts_df.copy()
+    temp2['series'] = 'Regrading'
+    df_combinedForFig = pd.concat([temp1, temp2])
+    ss.df_combinedForFig = df_combinedForFig
+    
 if st.session_state['allActivity_df'] is None:
     # Display the uploader only if no file has been uploaded yet
     st.file_uploader(
@@ -286,25 +299,38 @@ else:
     
     st.write(f'Regrading started {ss.regrading_start.strftime("%b %d, %Y at %I:%M %p")}')
     
-    temp1 = ss.grading_acts_df.copy()
-    temp1['series'] = 'Grading'
-    temp2 = ss.regrading_acts_df.copy()
-    temp2['series'] = 'Regrading'
-    df_combinedForFig = pd.concat([temp1, temp2])
-    ss.hist_xMin = min(df_combinedForFig['Time'])
-    ss.hist_xMax = max(df_combinedForFig['Time'])
-    fig = px.histogram(df_combinedForFig,
+    if ss.df_combinedForFig is None:
+        prepFig1()    
+    
+    text_str = 'Drag horizontally from left to right (or right to left) to zoom in the plotting range. '
+    text_str += 'Double click anywhere in the graph to reset. Be aware that '
+    text_str += 'large classes with complicated rubrics and small bin sizes can lead to sluggish interactive graphs.'
+    st.write(text_str)
+    bin_type = st.selectbox("Select Bin Size", ['1 day', '1 hr', '30 min', '10 min'])
+    if bin_type == '10 min':
+        xbins_size = 10 * 60 * 1000
+    elif bin_type == '30 min':
+        xbins_size = 30 * 60 * 1000
+    elif bin_type == '1 hr':
+        xbins_size = 60 * 60 * 1000
+    else: # '1 day'
+        xbins_size = 24 * 60 * 60 * 1000
+
+    fig = px.histogram(ss.df_combinedForFig,
                        x = 'Time',
                        color = 'series',
                        barmode = 'overlay',
-                       color_discrete_sequence = ['blue', 'red'],
-                       range_x=[ss.hist_xMin, ss.hist_xMax])
-    fig.update_traces(xbins_size = 'D1')
-    fig.update_layout(bargap = 0.2)
+                       color_discrete_sequence = ['blue', 'red'])
+    fig.update_traces(xbins_size=xbins_size)
+
+    fig.update_layout(bargap = 0.1)
     st.plotly_chart(fig, width = 'stretch')
     
-    st.write('#### Papers with multiple graders')
+    st.write('#### Papers with multiple graders (Useful for lab reports, not exams)')
     st.write('The less common grader(s) are highlighted in yellow. MC = most common grader, nMC = next most common grader, etc.')
+    total_cells = ss.multipleGraders_df.data.size
+    if total_cells > 262144:
+        pd.set_option("styler.render.max_elements", total_cells)
     st.dataframe(ss.multipleGraders_df, 
                  column_config={"link": st.column_config.LinkColumn("link", display_text="link")},
                  hide_index=True)
@@ -335,9 +361,7 @@ else:
                            x = 'Time',
                            color = 'series',
                            barmode = 'overlay',
-                           color_discrete_sequence = ['blue', 'red'],
-                           range_x=[ss.hist_xMin, ss.hist_xMax])
-        fig2.update_traces(xbins_size = 'D1')
+                           color_discrete_sequence = ['blue', 'red'])
         fig2.update_layout(bargap = 0.2)
         st.plotly_chart(fig2, width = 'stretch')
     
@@ -349,10 +373,13 @@ else:
     
     if ss.regrades_df is not None:
         st.write('### All regrading activity')
-        text_str = 'If the text in a cell is too long to read, double-click for a better view.'
+        text_str = 'If the text in a cell is too long to read, double-click for a better view. '
         st.write(text_str)
         if 'regrades_df' in ss:
-            st.dataframe(ss['regrades_df'], hide_index=True, row_height=150)
+            st.dataframe(ss['regrades_df'],
+                            hide_index=True, 
+                            column_config={"link": st.column_config.LinkColumn("link", display_text="link")},
+                            row_height=150)
 
         
 

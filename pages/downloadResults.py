@@ -103,17 +103,24 @@ def get_questions():
     url = ('https://www.gradescope.com/courses/' + str(ss['course_id']) + '/assignments/'
             + str(ss['assignment_id']) + '/statistics')
     driver.get(url)
-    div_class_name = 'statisticsTable'
+
+    div_ID = 'page-switcher-tabpanel-QUESTIONS_PAGE'    # This div is also on unsubmitted assignments
     try:
         # Wait until the element with the specified class is visible
         visible_div = WebDriverWait(driver, TIMEOUT).until(
-            EC.visibility_of_element_located((By.CLASS_NAME, div_class_name))
+            EC.visibility_of_element_located((By.ID, div_ID))
         )
     
     except TimeoutException:
         st.write(f"Timed out waiting for the div with class '{div_class_name}' to become visible.")    
     
     soup = BeautifulSoup(driver.page_source, 'lxml')
+    
+    div = soup.find('div', class_='blankState--heading')
+    if div:
+        st.error('This assignment appears to be ungraded. Choose a different assignment.')
+        st.stop()
+        
     questions = []
 
     divs = soup.find_all('div', class_='statisticsItem--title')
@@ -174,7 +181,7 @@ def get_regrades_df():
             + str(ss['assignment_id']) + '/regrade_requests')
     driver.get(url)
 
-    div_class_name = '.table.js-regradeRequestsTable.dataTable.no-footer'
+    div_class_name = '.table--header.table--header-withFilter'
     
     try:
         # Wait until the element with the specified class is visible
@@ -188,13 +195,13 @@ def get_regrades_df():
     regrades = []
     # Need to determine whether grades have been released yet
     soup = BeautifulSoup(driver.page_source, 'lxml')
-    grades_not_released = soup.find('div', id='blank_state')
+    grades_not_released = soup.find('div', class_='blankState')
     if grades_not_released is not None:
         return regrades
 
     try:
         table_element = WebDriverWait(driver, TIMEOUT).until(
-            EC.presence_of_element_located((By.XPATH, "//table[@id='DataTables_Table_0']"))
+            EC.presence_of_element_located((By.ID, "DataTables_Table_0"))
         )
     except TimeoutException:
         st.write("Timed out waiting for the table DataTables_Table_0 to become visible.") 
@@ -204,14 +211,14 @@ def get_regrades_df():
     regrades_df = pd.read_html(StringIO(table_html))[0]
     
     # Grab the links to the regrade results, and store in regrades_df
-    soup = BeautifulSoup(table_html, 'html.parser')
-    links = [a.get('href')
+    soup = BeautifulSoup(table_html, 'lxml') # was 'html.parser'
+    links = [("https://www.gradescope.com" + a.get('href'))
              for a in soup.find_all('a', href=True)
              if 'Review' not in a.get_text(strip = True)]
     regrades_df['link'] = links
     regrades_df['submission_id'] = (regrades_df['link'].str.split('/').str[-1]).str.split('#').str[0]
     regrades_df['Q_short'] = 'Q ' + regrades_df['Question'].str.split(':').str[0]
-    cols_to_drop = ['Sections','Completed','Review', 'link']
+    cols_to_drop = ['Sections','Completed','Review']
     regrades_df = regrades_df.drop(columns = cols_to_drop)
     regrades_df = regrades_df.sort_values(by = 'Student')
 
@@ -231,6 +238,10 @@ def get_regrades_df():
 
     cols_to_drop = ['Q_short','submission_id']
     regrades_df = regrades_df.drop(columns = cols_to_drop)
+    
+    col_order = ['Student', 'Question', 'Grader', 'link', 'Student_comment', 'Grader_reply', 'complete', 'Submission_time']
+    regrades_df = regrades_df[col_order]
+    regrades_df = regrades_df.drop_duplicates() # This corrects an issue with students who submit a second request for the same question
     ss.regrades_df = regrades_df
 
 def get_regrades_for_one_student(submission_id):
@@ -250,7 +261,7 @@ def get_regrades_for_one_student(submission_id):
     except TimeoutException:
         st.write(f"Timed out waiting for the div with class '{div_class_name}' to become visible.") 
         
-    soup = BeautifulSoup(driver.page_source, 'html.parser')   
+    soup = BeautifulSoup(driver.page_source, 'lxml')   # was 'html.parser'
     
     element_with_props = soup.find('div', attrs={'data-react-class': 'AssignmentSubmissionViewer', 
                                                  'data-react-props': True})
@@ -292,7 +303,7 @@ def get_regrades_for_one_student(submission_id):
             new_row_data =[str(question), Submission_time, Student_comment, Grader_reply, complete]
             regrades_for_student_df.loc[len(regrades_for_student_df)] = new_row_data
             
-#     st.dataframe(regrades_for_student_df)
+    # If a student submits a second regrade request for the same item, both requests appear twice. Avoid this by dropping duplicates.
     return regrades_for_student_df
 
 def get_all_rubric_items():
@@ -395,7 +406,7 @@ def get_students_in_order():
     ss['activity_df'] = ss['activity_df'].reset_index()
     
     # While we are here, let's grab links to student papers
-    soup = BeautifulSoup(table_html, 'html.parser')
+    soup = BeautifulSoup(table_html, 'lxml') # was 'html.parser'
     tds = soup.find_all('td', class_ = 'table--primaryLink')
     updates = {}
     for td in tds:
@@ -643,6 +654,9 @@ if ss.course_id is not None and ss.assignment_id is not None:
     text_str += ' their data will be downloaded. At the end, you will be '
     text_str += 'given the opportunity to save the grading data to an Excel file for analysis.'
     st.write(text_str)
+    text_str = 'The slowest part of this process is often Gradescope\'s calculation of the assignment statistics, '
+    text_str += 'which cannot be sped up. This is necessary for us to grab the links to specific rubric items.'
+    st.write(text_str)
     if st.button("Start Downloading", type = 'primary'):
         status_placeholder = st.empty()
         start_time = time.perf_counter()
@@ -663,7 +677,9 @@ if ss.activity_df is not None:
     text_str = 'If the text in a cell is too long to read, double-click for a better view.'
     st.write(text_str)
     if 'regrades_df' in ss:
-        st.dataframe(ss['regrades_df'], hide_index=True, row_height=110)
+        st.dataframe(ss['regrades_df'],
+                        column_config={"link": st.column_config.LinkColumn("link", display_text="link")},
+                        hide_index=True, row_height=110)
 
     text_str = 'You can save the data '
     text_str += 'as separate sheets of a single Excel file in your downloads folder '
