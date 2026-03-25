@@ -101,7 +101,9 @@ def get_questions():
         
     driver = ss['driver']
     url = ('https://www.gradescope.com/courses/' + str(ss['course_id']) + '/assignments/'
-            + str(ss['assignment_id']) + '/statistics')
+            + str(ss['assignment_id']) + '/statistics') #?sectionIds%5B%5D=1061335
+    if ss.section_with_min_studentsID is not None:
+        url = url + '?sectionIds%5B%5D=' + str(ss.section_with_min_studentsID)
     driver.get(url)
 
     div_ID = 'page-switcher-tabpanel-QUESTIONS_PAGE'    # This div is also on unsubmitted assignments
@@ -145,7 +147,10 @@ def get_rubric_items(question_index):
     question_id = ss['questions'][question_index][0]
     question_num = ss['questions'][question_index][1]
     url = ('https://www.gradescope.com/courses/' + str(ss['course_id']) + '/questions/'
-            + str(question_id) + '/statistics')
+            + str(question_id) + '/statistics')  #?sectionIds%5B%5D=1061335
+    if ss.section_with_min_studentsID is not None:
+        url = url + '?sectionIds%5B%5D=' + str(ss.section_with_min_studentsID)
+
     driver.get(url)
     div_class_name = 'statisticsSummary'
     try:
@@ -423,12 +428,24 @@ def process_the_assignment():
     ss.downloaded_assignment = ss.selected_assignment   # Prevents problems upon page switching
     if 'driver' not in ss:
         GS_login()
+    get_section_with_min_students()
     get_questions()
     get_students_in_order()
     get_all_rubric_items()
     get_assignment_data()
     ss.questionName_dict = None
     get_regrades_df()
+    
+    # Fix the year, particularly for Fall semester wher grading goes into January
+    
+    cols = [col for col in ss.activity_df.columns if col.startswith('G time')]
+    ss.activity_df[cols] = ss.activity_df[cols].apply(pd.to_datetime)
+    fix_the_year(ss.activity_df, cols, ss.term, ss.year)
+    if ss.regrades_df is not None:
+        cols = ['Submission_time']
+        ss.regrades_df['Submission_time'] = ss.regrades_df['Submission_time'].apply(pd.to_datetime)
+        fix_the_year(ss.regrades_df, cols, ss.term, ss.year)       
+
 
 def reset_contents():
     ss.activity_df = None
@@ -450,8 +467,8 @@ def previousTerm(currentTerm):
 def currentTerm():
     """ Guesses the current semester based on today's date. """
     today = date.today()
-    springEnd = datetime.strptime('May 30 2025', '%b %d %Y').date().replace(year=today.year)
-    summerEnd = datetime.strptime('Aug 15 2025', '%b %d %Y').date().replace(year=today.year)
+    springEnd = datetime.strptime('May 20 2025', '%b %d %Y').date().replace(year=today.year)
+    summerEnd = datetime.strptime('Aug 20 2025', '%b %d %Y').date().replace(year=today.year)
     term = 'Spring' if today < springEnd else ('Summer' if today < summerEnd else 'Fall')
     curTerm = term + ' ' + str(today.year)
     return curTerm
@@ -507,7 +524,7 @@ def get_courses(recent = True):
     ss['course_dict'] = course_dict
     
 def get_year():
-    """ Gets the current year by looking on the dashboard """
+    """ Gets the term and year by looking on the dashboard """
     driver = ss.driver
     url = 'https://www.gradescope.com/courses/' + str(ss.course_id)
     driver.get(url)
@@ -526,11 +543,12 @@ def get_year():
     
     div = soup.find('h2', class_='courseHeader--term')
     if div is not None:
-        term = div.text
-        year = int(term.split()[-1])
+        term_year = div.text
     else:
-        year = int(datetime.now().year)
-    ss.year = year
+        term_year = currentTerm()
+    ss.year = int(term_year.split()[-1])
+    ss.term = term_year.split()[0]
+    st.write(ss.year, ss.term)
 
 def get_assignments(course_id):
     """ Gets a dictionary of all of the assignments associated with the course_id. Returns
@@ -565,6 +583,59 @@ def get_assignments(course_id):
     assignment_dict = {k:v for k, v in zip(assignment_names, assignment_ids)}
     ss.assignment_dict = assignment_dict
 
+def get_section_with_min_students():
+    """ Find the section with the minimum number of students to speed up Gradescope """
+    driver = ss.driver
+    url = 'https://www.gradescope.com/courses/' + str(ss.course_id) + '/sections'
+    driver.get(url)
+    
+    div_class_name = '.l-reactWrapper.notranslate' 
+    try:
+        # Wait until the element with the specified class is visible
+        visible_div = WebDriverWait(driver, TIMEOUT).until(
+            EC.visibility_of_element_located((By.CSS_SELECTOR, div_class_name))
+        )
+    
+    except TimeoutException:
+        st.write(f"Timed out waiting for the div with class '{div_class_name}' to become visible.") 
+        
+    soup = BeautifulSoup(driver.page_source, 'lxml')   # was 'html.parser'
+
+    element_with_props = soup.find('div', attrs={'data-react-class': 'CourseSections'})
+    
+    ss.section_with_min_studentsID = None
+    if element_with_props:
+        props_json_string = element_with_props['data-react-props']
+        data_props = json.loads(props_json_string)
+        section_dict = data_props['sectionNameBySectionId']
+        sectionID_dict  = {value: key for key, value in section_dict.items()}
+    
+    table_element = soup.find('table', class_ = 'table table-courseSections')
+    if table_element:
+        table_html = str(table_element)
+        sections_df = pd.read_html(StringIO(table_html))[0]
+        min_students_index = sections_df['Students'].idxmin()
+        section_with_min_students = sections_df.loc[min_students_index, 'Section Name']
+        ss.section_with_min_studentsID = sectionID_dict[section_with_min_students]
+
+def fix_the_year(df, colList, term, year):
+    """ Gradescope does not record the year in its dates, so we initially guess year from term.
+            This causes a problem in the Fall, because late grading can go into January. Try to fix this """
+
+    if term == 'Summer':
+        startDate = pd.to_datetime('2000-05-20').replace(year=year)
+    elif term == 'Fall':
+        startDate = pd.to_datetime('2000-08-20').replace(year=year)
+    else:
+        return
+    
+    for col in colList:
+        # Check if the date's month and day combination is before startDate
+        mask = df[col].dt.to_period('D') < pd.Period(startDate, freq='D')
+        
+        # Fix any dates that are too early
+        df.loc[mask, col] += pd.offsets.DateOffset(years=1)
+    
 def handle_course_change():
     """ Handles course selection change drop down. When the course changes, get a list
         of all assignments for that course and reset the assignment selector to none """
@@ -616,6 +687,12 @@ if 'activity_df' not in ss:
     ss.activity_df = None
 if 'regrades_df' not in ss:
     ss.regrades_df = None
+if 'section_with_min_studentsID' not in ss:
+    ss.section_with_min_studentsID = None
+if 'year' not in ss:
+    ss.year = None
+if 'term' not in ss:
+    ss.term = None
 
 st.title('Download Assignment Grading Data')
 
@@ -655,7 +732,7 @@ if ss.course_id is not None and ss.assignment_id is not None:
     text_str += 'given the opportunity to save the grading data to an Excel file for analysis.'
     st.write(text_str)
     text_str = 'The slowest part of this process is often Gradescope\'s calculation of the assignment statistics, '
-    text_str += 'which cannot be sped up. This is necessary for us to grab the links to specific rubric items.'
+    text_str += 'which we try to speed up by only looking at the smallest section.'
     st.write(text_str)
     if st.button("Start Downloading", type = 'primary'):
         status_placeholder = st.empty()

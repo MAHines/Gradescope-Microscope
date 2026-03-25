@@ -198,6 +198,10 @@ def handle_allActivity_upload():
         if regrades_df is not None:
             regrades_df['Submission_time'] = regrades_df['Submission_time'].apply(pd.to_datetime)
         
+        fix_the_year(allActivity_df, cols, 'Fall', 2025)
+#         cols = ['Submission_time']
+#         fix_the_year(regrades_df, cols, 'Fall', 2025)       
+        
         # Make a df that only contains columns starting with G last and use this to get all grader names
         temp_df = allActivity_df.copy()
         temp_df = temp_df.loc[:, temp_df.columns.str.startswith('G last')]
@@ -228,6 +232,24 @@ def handle_allActivity_upload():
         ss.regrades_df = regrades_df
         create_grading_acts_df()
 
+def fix_the_year(df, colList, term, year):
+    """ Gradescope does not record the year in its dates, so we initially guess year from term.
+            This causes a problem in the Fall, because late grading can go into January. Try to fix this """
+
+    if term == 'Summer':
+        startDate = pd.to_datetime('2000-05-20').replace(year=year)
+    elif term == 'Fall':
+        startDate = pd.to_datetime('2000-08-20').replace(year=year)
+    else:
+        return
+    
+    for col in colList:
+        # Check if the date's month and day combination is before startDate
+        mask = df[col].dt.to_period('D') < pd.Period(startDate, freq='D')
+        
+        # Fix any dates that are too early
+        df.loc[mask, col] += pd.offsets.DateOffset(years=1)
+    
 def reset_uploader():
     """Function to clear the uploaded files and show the uploader again."""
     ss['allActivity_df'] = None
