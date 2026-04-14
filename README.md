@@ -56,6 +56,16 @@ unauthorized grading if each paper is supposed to be graded (and regraded) by a 
 can also be used to analyze an individual grader's behavior, which can be useful in understanding
 slow graders or awkward rubrics.
 
+### Combine Daily Grading Reports
+
+This module combines all of the Gradescope grading analyses with the TA's assigned times (e.g., for labs, OHs, 
+class, TA meetings, and proctoring) to calculate the actual amount of time each TA spends on 
+a class every week. The TA-by-TA output is displayed graphically, as shown below.  
+
+<div align="center">
+    <img src="assets/Weekly_Summary.png" alt="Histogram of TA grading times" style="width: 80%;">
+</div>
+
 ### Analyze Grades
 
 This module analyzes grading stored in a folder of Gradescope scores for an assignment, producing a grader-by-grader analysis as shown below.  
