@@ -74,6 +74,7 @@ def prepare_time_plot(grader):
     grader_assignedTime_df = grader_assignedTime_df.rename(columns = {'total_weekly_hr': 'assign_weekly_hr'})
     merged_df = pd.merge(grader_time_df, grader_assignedTime_df, on = ['Name', 'Day'])
     merged_df['grading_weekly_hr'] = merged_df['total_weekly_hr'] - merged_df['assign_weekly_hr']
+    avg = merged_df['total_weekly_hr'].mean()
     
     myTitle = f'Weekly Hours for {grader}'
     fig = px.bar(merged_df,
@@ -84,15 +85,25 @@ def prepare_time_plot(grader):
     new_names = {'assign_weekly_hr': 'Assigned Hrs', 'grading_weekly_hr': 'Grading'}
     fig.for_each_trace(lambda t: t.update(name = new_names[t.name]))    
     
-    fig.add_hline(y = 20,
+    fig.add_hline(y = 20, 
                     line_dash = 'dash',
                     line_color = 'red',
-                    annotation_text = 'max',
-                    annotation_position = 'top right')
+                    label=dict(text = 'max',
+                               textposition = 'end',
+                               font=dict(color = 'black')))
+    
+    fig.add_hline(y = avg,
+                    line_dash = 'dashdot',
+                    line_color = 'black',
+                    label=dict(text = 'avg ',
+                               textposition = 'end',
+                               font=dict(color = 'black')))
     
     fig.update_layout(yaxis_title = 'Hours',
                       xaxis_title = 'Week',
                       legend_title_text = 'Activity')
+    fig.update_xaxes(tickfont_color = 'black', title_font_color = 'black')
+    fig.update_yaxes(tickfont_color = 'black', title_font_color = 'black')
     
     return fig
 
@@ -106,6 +117,29 @@ if 'weekly_df' not in ss:
 st.set_page_config(layout='wide')
 
 st.title('Combine Daily Grading Reports')
+
+text_str = 'This module is used to calculate a TA-by-TA accounting of time spent on a course. '
+text_str += 'It combines the data from individual grading reports (e.g., exams, lab reports) with '
+text_str += 'the \'assigned\' time commitments (e.g., lectures, OHs, staff meetings, proctoring) '
+text_str += 'stored in a Assigned Activity csv. '
+st.write(text_str)
+
+text_str = 'Before using this script, you must make an Assigned Activity csv using the \'Make Assigned '
+text_str += 'Activities Sheet\' script. I suggest storing the csv in the appropriate folder of your Microscope Archive. '
+text_str += 'You only need to do this once per semester. ' 
+text_str += 'The root of your Microscope Archive is set in Settings. On a Mac, the archive for a course will '
+text_str += 'be something like ~/Document/Microscope/CHEM2070/2026Spring.' 
+st.write(text_str)
+
+text_str = 'To run this script, click the file uploader below, then select all of the daily grading reports to be combined. '
+text_str += 'These are stored in the appropriate folder of your Microscope Archive as DailySum_GS_*.xlsx. '
+text_str += 'After this completes, use the next file uploader to upload your assignedActivity.csv file.'
+st.write(text_str)
+
+text_str = 'If you would like to save your output, I suggest using Print > Save as PDF. Make a '
+text_str += 'special paper size (e.g., US Long) that is 8.5" x 110". This will allow you to save '
+text_str += 'the report as a long pdf with no annoying page breaks.'
+st.write(text_str)
 
 if ss.allDaily_df is None:
     # Display the uploader only if no file has been uploaded yet

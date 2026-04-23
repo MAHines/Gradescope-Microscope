@@ -212,6 +212,9 @@ def handle_allActivity_upload():
                 allActivity_df = df
             elif sheet_name == 'Regrading':
                 regrades_df = df
+            elif sheet_name == 'filePath':
+                ss.pathName = df.iloc[0, 0] # Stored in A1 
+                st.write(ss.pathName)
         
         allActivity_df['Student\'s name'] = allActivity_df['Student\'s name'].str.replace(r'\s*\(.*?\)', '', regex=True) # Strip e-mail addresses for brevity
 
@@ -250,6 +253,14 @@ def handle_allActivity_upload():
         ss.regrades_df = regrades_df
         create_grading_acts_df()
 
+def prepFig1():
+    temp1 = ss.grading_acts_df.copy()
+    temp1['series'] = 'Grading'
+    temp2 = ss.regrading_acts_df.copy()
+    temp2['series'] = 'Regrading'
+    df_combinedForFig = pd.concat([temp1, temp2])
+    ss.df_combinedForFig = df_combinedForFig
+    
 def reset_uploader():
     """Function to clear the uploaded files and show the uploader again."""
     ss['allActivity_df'] = None
@@ -288,8 +299,23 @@ if 'regraderDailySummary_df' not in ss:
     ss.regraderDailySummary_df = None
 if 'uploaded_fileName' not in ss:
     ss.uploaded_fileName = None
+if 'pathName' not in ss:
+    ss.pathName = None
 
 st.title('Analyze Grader Activity')
+
+text_str = 'This module analyzes the grading activity downloaded from Gradescope using the '
+text_str += '\'Download Gradescope Results\' script. Select the grader activity file, which should '
+text_str += 'be stored in your Microscope Archive and named something like \'GS_Iron_Complex_Apr_15.xlsx\' '
+text_str += 'where \'Apr_15\' is today\'s date and \'Iron_Complex\' is the first two words of the assignment name. '
+text_str += 'An estimate of the time each grader spent grading will then be calculated.'
+st.write(text_str)
+
+text_str = 'After analyzing the activity, you will be given '
+text_str += 'the option to save your analysis to your Microscope Archive in a file autonamed something like '
+text_str += 'DailySum_GS_Iron_Complex_Apr_15.xlsx.'
+st.write(text_str)
+
 
 if 'use_grader_white_list_input_local' not in ss:
     ss.use_grader_white_list_input_local = ss['toml_dict']['user']['use_grader_white_list']
@@ -305,14 +331,6 @@ st.button("Reset or work on a different course.",
             on_click=reset_uploader,
             type = 'primary')
 
-def prepFig1():
-    temp1 = ss.grading_acts_df.copy()
-    temp1['series'] = 'Grading'
-    temp2 = ss.regrading_acts_df.copy()
-    temp2['series'] = 'Regrading'
-    df_combinedForFig = pd.concat([temp1, temp2])
-    ss.df_combinedForFig = df_combinedForFig
-    
 if st.session_state['allActivity_df'] is None:
     # Display the uploader only if no file has been uploaded yet
     st.file_uploader(
@@ -325,24 +343,29 @@ if st.session_state['allActivity_df'] is None:
 else:
     st.write('#### :gray[All activity already uploaded.]')
     
-    text_str = 'The button below will archive the daily activity to the root of your Microscope archive. '
-    text_str += 'Because of security limitations, streamlit does not \'remember\' which folder you uploaded '
-    text_str += 'the analyzed file from.'
+    text_str = 'The button below will save the daily activity to the same folder as your archive. '
     st.write(text_str)
     if st.button('Archive Daily Activity to Excel', type = 'primary'):
         fileName = 'DailySum_' + ss.uploaded_fileName
-        relativePath = ss['toml_dict']['user']['archive_location'][2:] # Chop off ~
-        path_folders = [item.strip() for item in relativePath.split('/')]
-        archive_file_path = Path.home()
-        for folder in path_folders:
-            archive_file_path = archive_file_path / folder            
-        archive_file_path = archive_file_path / fileName
-        archive_file_path.parent.mkdir(parents=True, exist_ok=True) # Ensure the parent directory exists
+        if ss.pathName is not None:
+            path = Path(ss.pathName)
+            directory = path.parent
+            archive_file_path = directory / fileName
+        else:   # If pathName not saved, store in root folder. This should never be needed.
+            relativePath = ss['toml_dict']['user']['archive_location'][2:] # Chop off ~
+            path_folders = [item.strip() for item in relativePath.split('/')]
+            archive_file_path = Path.home()
+            for folder in path_folders:
+                archive_file_path = archive_file_path / folder            
+            archive_file_path = archive_file_path / fileName
+            archive_file_path.parent.mkdir(parents=True, exist_ok=True) # Ensure the parent directory exists
         with pd.ExcelWriter(archive_file_path, mode = 'w',engine='xlsxwriter') as writer:
             # Write each dataframe to a different worksheet
             ss.graderDailySummary_df.to_excel(writer, sheet_name='Daily_Grading', index=False)
-            if ss.regrades_df is not None:
+            if ss.regraderDailySummary_df is not None:
                 ss.regraderDailySummary_df.to_excel(writer, sheet_name='Daily_Regrading', index=False)
+            filePath_df = pd.DataFrame({'filePath': [str(archive_file_path)]})
+            filePath_df.to_excel(writer, sheet_name='filePath', index=False)
     
     st.write(f'Regrading started {ss.regrading_start.strftime("%b %d, %Y at %I:%M %p")}')
     

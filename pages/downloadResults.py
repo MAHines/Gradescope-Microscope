@@ -705,6 +705,20 @@ if 'courseName' not in ss:
 
 st.title('Download Assignment Grading Data')
 
+text_str = 'This module allows you to download all of the assignment grading data from Gradescope. '
+text_str += 'At the end of this process, you will be given an option to either Save to Excel (old method) or '
+text_str += '**Archive to Excel** (preferred). I strongly suggest the latter.'
+st.write(text_str)
+
+text_str = 'Your results will be stored in an autonamed file something like \'GS_Iron_Complex_Apr_15.xlsx\' '
+text_str += 'where \'Apr_15\' is today\'s date and \'Iron_Complex\' is the first two words of the assignment name.'
+st.write(text_str)
+
+text_str = 'The location of your Microscope archive is set in Settings. On a Mac, the root folder of your Microscope archive '
+text_str += 'is likely ~/Documents/Microscope/. Each course will be stored in subfolders whose names are derived '
+text_str += 'from your Gradescope course, e.g., ~/Documents/Microscope/Chem2070/2026Spring/.'
+st.write(text_str)
+
 text_str = "Use the button below to log in to Gradescope. If you are NOT using automated password login,  "
 text_str += "you will have 3 min to complete the login in the browser window after you push the button. "
 text_str += "In either case, leave the browser window open after you finish logging in."
@@ -802,6 +816,8 @@ if ss.activity_df is not None:
                 ss.activity_df.to_excel(writer, sheet_name='Grading', index=False)
                 if ss.regrades_df is not None:
                     ss.regrades_df.to_excel(writer, sheet_name='Regrading', index=False)
+                filePath_df = pd.DataFrame({'filePath': [str(archive_file_path)]})
+                filePath_df.to_excel(writer, sheet_name='filePath', index=False)
                     
     text_str = 'You can use the button below to \'Export Evaluations\' for this assignment. '
     text_str += 'Your Chromium window may say \'insecure download blocked.\' If so, select '
